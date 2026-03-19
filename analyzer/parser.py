@@ -13,6 +13,7 @@ import requests
 from typing import List, Optional
 from bs4 import BeautifulSoup
 import PyPDF2
+from youtube_transcript_api import YouTubeTranscriptApi
 
 # Common abbreviations
 _ABBREVS = {
@@ -88,3 +89,39 @@ def extract_text_from_pdf(file_obj) -> Optional[str]:
         return text.strip()
     except Exception:
         return None
+
+def extract_text_from_youtube(url: str) -> Optional[str]:
+    """Fetch and extract the transcript from a YouTube URL robustly."""
+    try:
+        # Robust 11-char regex for YouTube Video IDs
+        match = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11})", url)
+        if not match: 
+            return "Error: Could not extract an 11-character YouTube video ID from the URL."
+        video_id = match.group(1)
+        
+        try:
+            # 1. Fetch transcript metadata
+            yt_api = YouTubeTranscriptApi()
+            transcript_list = yt_api.list(video_id)
+            
+            # 2. Try manual english, then auto english, then translate whatever exists
+            try:
+                transcript = transcript_list.find_transcript(['en', 'en-US', 'en-GB']).fetch()
+            except Exception:
+                try:
+                    transcript = transcript_list.find_generated_transcript(['en', 'en-US', 'en-GB']).fetch()
+                except Exception:
+                    # Grab whatever the first transcript language is, and translate it to English
+                    for t in transcript_list:
+                        transcript = t.translate('en').fetch()
+                        break
+        except Exception as e:
+            # Final fallback directly to the raw getter
+            yt_api = YouTubeTranscriptApi()
+            transcript = yt_api.fetch(video_id)
+            
+        text = " ".join([getattr(t, "text", "") if hasattr(t, "text") else t.get("text", "") for t in transcript])
+        return text.replace("  ", " ").strip()
+    except Exception as e:
+        return f"Error: {str(e)}"
+
